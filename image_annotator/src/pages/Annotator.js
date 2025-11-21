@@ -3,7 +3,7 @@ import OpenSeadragon from "openseadragon";
 
 const Annotator = () => {
   const [annotations, setAnnotations] = useState([]);
-  const [annotation, setAnnotation] = useState({}); // Current annotation being drawn/edited
+  const [annotation, setAnnotation] = useState({});
   const [dziUrl, setDziUrl] = useState(null);
   const viewerRef = useRef(null);
 
@@ -11,10 +11,14 @@ const Annotator = () => {
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const isSpacePressedRef = useRef(false);
 
+
+
+  // -------------------------------------------------------
+  // Space key to pan
+  // -------------------------------------------------------
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.code === 'Space' && !e.repeat) {
-        // Prevent default scrolling behavior if focus is not on an input
         if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
           e.preventDefault();
         }
@@ -22,6 +26,7 @@ const Annotator = () => {
         isSpacePressedRef.current = true;
       }
     };
+
     const handleKeyUp = (e) => {
       if (e.code === 'Space') {
         setIsSpacePressed(false);
@@ -31,12 +36,16 @@ const Annotator = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, []);
 
+  // -------------------------------------------------------
+  // Upload .svs
+  // -------------------------------------------------------
   const handleUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -47,24 +56,25 @@ const Annotator = () => {
     try {
       const res = await fetch("http://127.0.0.1:5000/upload", {
         method: "POST",
-        body: formData,
+        body: formData
       });
       const data = await res.json();
       setDziUrl(data.dzi_url);
-    } catch (error) {
-      console.error("Error uploading file:", error);
+    } catch (err) {
+      console.error(err);
     }
   };
 
+  // -------------------------------------------------------
+  // Init OpenSeadragon
+  // -------------------------------------------------------
   useEffect(() => {
     if (!dziUrl) return;
 
-    // Initialize OpenSeadragon
     const viewer = OpenSeadragon({
       id: "osd-viewer",
       prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/2.4.2/images/",
       tileSources: dziUrl,
-      showNavigator: false,
       gestureSettingsMouse: {
         clickToZoom: false
       }
@@ -73,166 +83,190 @@ const Annotator = () => {
     viewerRef.current = viewer;
 
     return () => {
-      if (viewerRef.current) {
-        viewerRef.current.destroy();
-        viewerRef.current = null;
-      }
+      viewer.destroy();
+      viewerRef.current = null;
     };
   }, [dziUrl]);
 
-  // Manage MouseTracker for drawing
+  // -------------------------------------------------------
+  // Drawing
+  // -------------------------------------------------------
   useEffect(() => {
     if (!viewerRef.current || !isDrawingMode) return;
 
     const viewer = viewerRef.current;
+
     const mouseTracker = new OpenSeadragon.MouseTracker({
       element: viewer.canvas,
+
       pressHandler: (event) => {
-        // Disable drawing if Space is pressed (Panning mode)
         if (isSpacePressedRef.current) return;
-        const viewportPoint = viewer.viewport.pointFromPixel(event.position);
+
+        const vp = viewer.viewport.pointFromPixel(event.position);
+
         setAnnotation({
           geometry: {
-            x: viewportPoint.x,
-            y: viewportPoint.y,
+            x: vp.x,
+            y: vp.y,
             width: 0,
-            height: 0,
-            type: "RECTANGLE"
+            height: 0
           },
           selection: {
             mode: "DRAWING",
-            anchorX: viewportPoint.x,
-            anchorY: viewportPoint.y
+            anchorX: vp.x,
+            anchorY: vp.y
           }
         });
       },
+
       dragHandler: (event) => {
         if (isSpacePressedRef.current) return;
+
         setAnnotation(prev => {
           if (!prev.selection || prev.selection.mode !== "DRAWING") return prev;
 
-          const viewportPoint = viewer.viewport.pointFromPixel(event.position);
+          const vp = viewer.viewport.pointFromPixel(event.position);
 
-          const width = viewportPoint.x - prev.selection.anchorX;
-          const height = viewportPoint.y - prev.selection.anchorY;
+          const w = vp.x - prev.selection.anchorX;
+          const h = vp.y - prev.selection.anchorY;
 
           return {
             ...prev,
             geometry: {
-              ...prev.geometry,
-              x: width > 0 ? prev.selection.anchorX : viewportPoint.x,
-              y: height > 0 ? prev.selection.anchorY : viewportPoint.y,
-              width: Math.abs(width),
-              height: Math.abs(height),
+              x: w > 0 ? prev.selection.anchorX : vp.x,
+              y: h > 0 ? prev.selection.anchorY : vp.y,
+              width: Math.abs(w),
+              height: Math.abs(h)
             }
           };
         });
       },
-      releaseHandler: (event) => {
+
+      releaseHandler: () => {
         if (isSpacePressedRef.current) return;
+
         setAnnotation(prev => {
           if (!prev.selection || prev.selection.mode !== "DRAWING") return prev;
 
-          // Auto-save the annotation immediately
-          const newAnnotation = {
+          const newAnno = {
             geometry: prev.geometry,
-            data: {
-              text: "", // No text required
-              id: Math.random()
-            }
+            data: { id: Math.random() }
           };
 
-          setAnnotations(currentAnnotations => [...currentAnnotations, newAnnotation]);
-
-          // Also, exit drawing mode
+          setAnnotations(a => [...a, newAnno]);
           setIsDrawingMode(false);
-
-          return {}; // Clear current annotation
+          return {};
         });
       }
     });
 
-    return () => {
-      mouseTracker.destroy();
-    };
-  }, [isDrawingMode, dziUrl]);
+    return () => mouseTracker.destroy();
+  }, [isDrawingMode]);
 
-  // Update viewer mouse nav enabled state based on mode
+  // -------------------------------------------------------
+  // Enable / disable pan
+  // -------------------------------------------------------
   useEffect(() => {
-    if (viewerRef.current) {
-      // Enable nav if NOT drawing OR if Space is pressed
-      const shouldEnableNav = !isDrawingMode || isSpacePressed;
-      viewerRef.current.setMouseNavEnabled(shouldEnableNav);
+    if (!viewerRef.current) return;
+    viewerRef.current.setMouseNavEnabled(!isDrawingMode || isSpacePressed);
+  }, [isDrawingMode, isSpacePressed]);
 
-      // Update cursor
-      if (isDrawingMode) {
-        viewerRef.current.canvas.style.cursor = isSpacePressed ? 'grab' : 'crosshair';
-      } else {
-        viewerRef.current.canvas.style.cursor = 'default';
+  // -------------------------------------------------------
+  // Undo with Ctrl+Z
+  // -------------------------------------------------------
+  useEffect(() => {
+    const handleKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        setAnnotations(prev => prev.slice(0, -1));
       }
-    }
-  }, [isDrawingMode, isSpacePressed, dziUrl]);
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
 
-  // Function to add overlays for annotations
+  // -------------------------------------------------------
+  // Render overlays
+  // -------------------------------------------------------
   useEffect(() => {
     if (!viewerRef.current) return;
     const viewer = viewerRef.current;
 
-    // Clear existing overlays (except the one being drawn if any, though simpler to clear all and redraw)
     viewer.clearOverlays();
 
     // Render saved annotations
     annotations.forEach((anno, index) => {
-      const element = document.createElement("div");
-      element.style.border = "2px solid red";
-      element.style.position = "absolute";
-      element.id = `annotation-${index}`;
+      const el = document.createElement("div");
 
-      // Label removed as per request
+      el.style.position = "absolute";
+      el.style.border = "2px solid red";
+      el.style.cursor = "default"; // No longer pointer since no selection
 
       viewer.addOverlay({
-        element: element,
-        location: new OpenSeadragon.Rect(anno.geometry.x, anno.geometry.y, anno.geometry.width, anno.geometry.height)
+        element: el,
+        location: new OpenSeadragon.Rect(
+          anno.geometry.x,
+          anno.geometry.y,
+          anno.geometry.width,
+          anno.geometry.height
+        )
       });
     });
 
-    // Render current drawing annotation
+    // Render drawing rectangle
     if (annotation.geometry) {
-      const element = document.createElement("div");
-      element.style.border = "2px solid red";
-      element.style.position = "absolute";
+      const el = document.createElement("div");
+      el.style.position = "absolute";
+      el.style.border = "2px solid red";
 
       viewer.addOverlay({
-        element: element,
-        location: new OpenSeadragon.Rect(annotation.geometry.x, annotation.geometry.y, annotation.geometry.width, annotation.geometry.height)
+        element: el,
+        location: new OpenSeadragon.Rect(
+          annotation.geometry.x,
+          annotation.geometry.y,
+          annotation.geometry.width,
+          annotation.geometry.height
+        )
       });
     }
 
-  }, [annotations, annotation, dziUrl]); // Re-run when annotations change
+  }, [annotations, annotation]);
 
+  // -------------------------------------------------------
+  // UI
+  // -------------------------------------------------------
   return (
     <div className="flex flex-col h-screen">
-      <div className="p-4 bg-gray-100 border-b border-gray-300 flex justify-between items-center">
-        <h1 className="text-xl font-bold">SVS Image Annotator</h1>
-        <div className="flex items-center gap-4">
+      <div className="p-4 bg-gray-100 border-b flex justify-between items-center">
+        <h1 className="text-xl font-bold">SVS Annotator</h1>
+
+        <div className="flex gap-3">
           <button
             onClick={() => setIsDrawingMode(!isDrawingMode)}
-            className={`px-4 py-2 rounded ${isDrawingMode ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'}`}
+            className="px-4 py-2 bg-blue-500 text-white rounded"
           >
-            {isDrawingMode ? 'Stop Drawing' : 'Draw Annotation'}
+            {isDrawingMode ? "Stop Drawing" : "Draw Annotation"}
           </button>
-          <input type="file" accept=".svs" onChange={handleUpload} className="p-2 border rounded" />
+
+          <button
+            disabled={annotations.length === 0}
+            onClick={() => setAnnotations(prev => prev.slice(0, -1))}
+            className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-red-600"
+              }`}
+          >
+            Undo
+          </button>
+
+          <input type="file" accept=".svs" onChange={handleUpload} />
         </div>
       </div>
 
-      <div className="flex-grow relative">
+      <div className="flex-grow">
         {dziUrl ? (
-          <>
-            <div id="osd-viewer" style={{ width: "100%", height: "100%", background: "black" }} />
-          </>
+          <div id="osd-viewer" style={{ width: "100%", height: "100%", background: "black" }} />
         ) : (
-          <div className="flex items-center justify-center h-full text-gray-500">
-            Please upload an .svs file to start annotating.
+          <div className="h-full flex items-center justify-center text-gray-500">
+            Upload .svs to start annotating
           </div>
         )}
       </div>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Annotator from "./pages/Annotator";
-import OpenSeadragonViewer from './components/OpenSeaDragonViewer';
+// import OpenSeadragonViewer from './components/OpenSeaDragonViewer';
 
 
 function App() {
@@ -16,9 +16,9 @@ function App() {
         setImagesPreview={setImagesPreview}
       />
     </div>
-  //   <div className="App">
-  //   <OpenSeadragonViewer></OpenSeadragonViewer>
-  // </div>
+    //   <div className="App">
+    //   <OpenSeadragonViewer></OpenSeadragonViewer>
+    // </div>
   );
 }
 
