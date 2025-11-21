@@ -3,11 +3,24 @@ import OpenSeadragon from "openseadragon";
 
 const Annotator = () => {
   const [annotations, setAnnotations] = useState([]);
+  const annotationsRef = useRef([]);
+  useEffect(() => {
+    annotationsRef.current = annotations;
+  }, [annotations]);
+
   const [annotation, setAnnotation] = useState({});
   const [dziUrl, setDziUrl] = useState(null);
   const viewerRef = useRef(null);
 
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
+
   const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const isDrawingModeRef = useRef(false); // Ref to access current state in event handlers without dependencies
+
+  useEffect(() => {
+    isDrawingModeRef.current = isDrawingMode;
+  }, [isDrawingMode]);
+
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const isSpacePressedRef = useRef(false);
 
@@ -25,6 +38,12 @@ const Annotator = () => {
         setIsSpacePressed(true);
         isSpacePressedRef.current = true;
       }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedAnnotationId) {
+          setAnnotations(prev => prev.filter(a => a.data.id !== selectedAnnotationId));
+          setSelectedAnnotationId(null);
+        }
+      }
     };
 
     const handleKeyUp = (e) => {
@@ -41,7 +60,7 @@ const Annotator = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [selectedAnnotationId]);
 
   // -------------------------------------------------------
   // Upload .svs
@@ -82,11 +101,35 @@ const Annotator = () => {
 
     viewerRef.current = viewer;
 
+    viewer.addHandler('canvas-click', (event) => {
+      if (!event.quick) return;
+
+      // Don't deselect if we are in drawing mode
+      if (isDrawingModeRef.current) return;
+
+      // Geometric hit testing
+      const vp = viewer.viewport.pointFromPixel(event.position);
+      const annos = annotationsRef.current;
+
+      let foundId = null;
+      // Iterate in reverse to find the top-most annotation
+      for (let i = annos.length - 1; i >= 0; i--) {
+        const anno = annos[i];
+        const { x, y, width, height } = anno.geometry;
+        if (vp.x >= x && vp.x <= x + width && vp.y >= y && vp.y <= y + height) {
+          foundId = anno.data.id;
+          break;
+        }
+      }
+
+      setSelectedAnnotationId(foundId);
+    });
+
     return () => {
       viewer.destroy();
       viewerRef.current = null;
     };
-  }, [dziUrl]);
+  }, [dziUrl]); // Removed isDrawingMode from dependencies
 
   // -------------------------------------------------------
   // Drawing
@@ -197,15 +240,17 @@ const Annotator = () => {
     // Render saved annotations
     annotations.forEach((anno, index) => {
       const el = document.createElement("div");
+      el.className = "annotation-overlay"; // Add class for identification
 
       el.style.position = "absolute";
-      el.style.border = "2px solid red";
-      el.style.cursor = "default"; // No longer pointer since no selection
+      el.style.border = anno.data.id === selectedAnnotationId ? "3px solid blue" : "2px solid red";
+      // No onclick handler needed, handled by canvas-click geometric test
+      el.style.cursor = "pointer";
 
       viewer.addOverlay({
         element: el,
         location: new OpenSeadragon.Rect(
-          anno.geometry.x,
+          anno.data.id === selectedAnnotationId ? anno.geometry.x - 0.0005 : anno.geometry.x,
           anno.geometry.y,
           anno.geometry.width,
           anno.geometry.height
@@ -230,7 +275,7 @@ const Annotator = () => {
       });
     }
 
-  }, [annotations, annotation]);
+  }, [annotations, annotation, selectedAnnotationId]);
 
   // -------------------------------------------------------
   // UI
@@ -249,9 +294,22 @@ const Annotator = () => {
           </button>
 
           <button
+            disabled={!selectedAnnotationId}
+            onClick={() => {
+              if (selectedAnnotationId) {
+                setAnnotations(prev => prev.filter(a => a.data.id !== selectedAnnotationId));
+                setSelectedAnnotationId(null);
+              }
+            }}
+            className={`px-4 py-2 rounded text-white ${!selectedAnnotationId ? "bg-gray-400" : "bg-red-600"}`}
+          >
+            Delete Selected
+          </button>
+
+          <button
             disabled={annotations.length === 0}
             onClick={() => setAnnotations(prev => prev.slice(0, -1))}
-            className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-red-600"
+            className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-gray-600"
               }`}
           >
             Undo
