@@ -15,6 +15,7 @@ const Annotator = () => {
 
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
   const [isLoading, setLoading] = useState(false);
+  const [currentFileName, setCurrentFileName] = useState(null);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const isDrawingModeRef = useRef(false);
 
@@ -70,7 +71,8 @@ const Annotator = () => {
     const file = event.target.files[0];
     if (!file) return;
 
-    setLoading(true); // start loading
+    setLoading(true);
+    setCurrentFileName(file.name);
 
     const formData = new FormData();
     formData.append("file", file);
@@ -86,6 +88,56 @@ const Annotator = () => {
     } catch (err) {
       console.error(err);
       setLoading(false);
+    }
+  };
+
+  // -------------------------------------------------------
+  // Save Annotations
+  // -------------------------------------------------------
+  const handleSave = async () => {
+    if (!currentFileName || annotations.length === 0) return;
+
+    try {
+      const res = await fetch("http://127.0.0.1:5000/save_annotations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          filename: currentFileName,
+          annotations: annotations
+        })
+      });
+
+      if (res.ok) {
+        alert("Annotations saved successfully!");
+      } else {
+        alert("Failed to save annotations.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error saving annotations.");
+    }
+  };
+
+  // -------------------------------------------------------
+  // Load Annotations
+  // -------------------------------------------------------
+  const handleLoad = async () => {
+    if (!currentFileName) return;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:5000/load_annotations?filename=${currentFileName}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAnnotations(data);
+        alert("Annotations loaded successfully!");
+      } else {
+        alert("No saved annotations found for this file.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error loading annotations.");
     }
   };
 
@@ -308,6 +360,22 @@ const Annotator = () => {
             className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-gray-600"}`}
           >
             Undo
+          </button>
+
+          <button
+            disabled={annotations.length === 0}
+            onClick={handleSave}
+            className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-green-600"}`}
+          >
+            Save Annotations
+          </button>
+
+          <button
+            disabled={!currentFileName}
+            onClick={handleLoad}
+            className={`px-4 py-2 rounded text-white ${!currentFileName ? "bg-gray-400" : "bg-yellow-600"}`}
+          >
+            Load Annotations
           </button>
 
           <input type="file" accept=".svs" onChange={handleUpload} />
