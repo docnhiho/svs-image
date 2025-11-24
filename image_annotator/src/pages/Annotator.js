@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import OpenSeadragon from "openseadragon";
+import Loading from '../components/Loading';
 
 const Annotator = () => {
   const [annotations, setAnnotations] = useState([]);
@@ -13,9 +14,9 @@ const Annotator = () => {
   const viewerRef = useRef(null);
 
   const [selectedAnnotationId, setSelectedAnnotationId] = useState(null);
-
+  const [isLoading, setLoading] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
-  const isDrawingModeRef = useRef(false); // Ref to access current state in event handlers without dependencies
+  const isDrawingModeRef = useRef(false);
 
   useEffect(() => {
     isDrawingModeRef.current = isDrawingMode;
@@ -23,8 +24,6 @@ const Annotator = () => {
 
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const isSpacePressedRef = useRef(false);
-
-
 
   // -------------------------------------------------------
   // Space key to pan
@@ -38,6 +37,7 @@ const Annotator = () => {
         setIsSpacePressed(true);
         isSpacePressedRef.current = true;
       }
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedAnnotationId) {
           setAnnotations(prev => prev.filter(a => a.data.id !== selectedAnnotationId));
@@ -62,12 +62,15 @@ const Annotator = () => {
     };
   }, [selectedAnnotationId]);
 
+
   // -------------------------------------------------------
   // Upload .svs
   // -------------------------------------------------------
   const handleUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
+
+    setLoading(true); // start loading
 
     const formData = new FormData();
     formData.append("file", file);
@@ -77,12 +80,15 @@ const Annotator = () => {
         method: "POST",
         body: formData
       });
+
       const data = await res.json();
       setDziUrl(data.dzi_url);
     } catch (err) {
       console.error(err);
+      setLoading(false);
     }
   };
+
 
   // -------------------------------------------------------
   // Init OpenSeadragon
@@ -101,21 +107,22 @@ const Annotator = () => {
 
     viewerRef.current = viewer;
 
+    viewer.addHandler("open", () => {
+      setLoading(false); // now image fully loaded
+    });
+
     viewer.addHandler('canvas-click', (event) => {
       if (!event.quick) return;
-
-      // Don't deselect if we are in drawing mode
       if (isDrawingModeRef.current) return;
 
-      // Geometric hit testing
       const vp = viewer.viewport.pointFromPixel(event.position);
       const annos = annotationsRef.current;
 
       let foundId = null;
-      // Iterate in reverse to find the top-most annotation
       for (let i = annos.length - 1; i >= 0; i--) {
         const anno = annos[i];
         const { x, y, width, height } = anno.geometry;
+
         if (vp.x >= x && vp.x <= x + width && vp.y >= y && vp.y <= y + height) {
           foundId = anno.data.id;
           break;
@@ -129,10 +136,11 @@ const Annotator = () => {
       viewer.destroy();
       viewerRef.current = null;
     };
-  }, [dziUrl]); // Removed isDrawingMode from dependencies
+  }, [dziUrl]);
+
 
   // -------------------------------------------------------
-  // Drawing
+  // Drawing rectangles
   // -------------------------------------------------------
   useEffect(() => {
     if (!viewerRef.current || !isDrawingMode) return;
@@ -148,17 +156,8 @@ const Annotator = () => {
         const vp = viewer.viewport.pointFromPixel(event.position);
 
         setAnnotation({
-          geometry: {
-            x: vp.x,
-            y: vp.y,
-            width: 0,
-            height: 0
-          },
-          selection: {
-            mode: "DRAWING",
-            anchorX: vp.x,
-            anchorY: vp.y
-          }
+          geometry: { x: vp.x, y: vp.y, width: 0, height: 0 },
+          selection: { mode: "DRAWING", anchorX: vp.x, anchorY: vp.y }
         });
       },
 
@@ -169,7 +168,6 @@ const Annotator = () => {
           if (!prev.selection || prev.selection.mode !== "DRAWING") return prev;
 
           const vp = viewer.viewport.pointFromPixel(event.position);
-
           const w = vp.x - prev.selection.anchorX;
           const h = vp.y - prev.selection.anchorY;
 
@@ -189,7 +187,7 @@ const Annotator = () => {
         if (isSpacePressedRef.current) return;
 
         setAnnotation(prev => {
-          if (!prev.selection || prev.selection.mode !== "DRAWING") return prev;
+          if (!prev.selection) return prev;
 
           const newAnno = {
             geometry: prev.geometry,
@@ -206,6 +204,7 @@ const Annotator = () => {
     return () => mouseTracker.destroy();
   }, [isDrawingMode]);
 
+
   // -------------------------------------------------------
   // Enable / disable pan
   // -------------------------------------------------------
@@ -214,8 +213,9 @@ const Annotator = () => {
     viewerRef.current.setMouseNavEnabled(!isDrawingMode || isSpacePressed);
   }, [isDrawingMode, isSpacePressed]);
 
+
   // -------------------------------------------------------
-  // Undo with Ctrl+Z
+  // Undo Ctrl+Z
   // -------------------------------------------------------
   useEffect(() => {
     const handleKey = (e) => {
@@ -228,6 +228,7 @@ const Annotator = () => {
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
+
   // -------------------------------------------------------
   // Render overlays
   // -------------------------------------------------------
@@ -237,20 +238,16 @@ const Annotator = () => {
 
     viewer.clearOverlays();
 
-    // Render saved annotations
-    annotations.forEach((anno, index) => {
+    annotations.forEach((anno) => {
       const el = document.createElement("div");
-      el.className = "annotation-overlay"; // Add class for identification
-
+      el.className = "annotation-overlay";
       el.style.position = "absolute";
       el.style.border = anno.data.id === selectedAnnotationId ? "3px solid blue" : "2px solid red";
-      // No onclick handler needed, handled by canvas-click geometric test
-      el.style.cursor = "pointer";
 
       viewer.addOverlay({
         element: el,
         location: new OpenSeadragon.Rect(
-          anno.data.id === selectedAnnotationId ? anno.geometry.x - 0.0005 : anno.geometry.x,
+          anno.geometry.x,
           anno.geometry.y,
           anno.geometry.width,
           anno.geometry.height
@@ -258,7 +255,6 @@ const Annotator = () => {
       });
     });
 
-    // Render drawing rectangle
     if (annotation.geometry) {
       const el = document.createElement("div");
       el.style.position = "absolute";
@@ -274,8 +270,8 @@ const Annotator = () => {
         )
       });
     }
-
   }, [annotations, annotation, selectedAnnotationId]);
+
 
   // -------------------------------------------------------
   // UI
@@ -309,8 +305,7 @@ const Annotator = () => {
           <button
             disabled={annotations.length === 0}
             onClick={() => setAnnotations(prev => prev.slice(0, -1))}
-            className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-gray-600"
-              }`}
+            className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-gray-600"}`}
           >
             Undo
           </button>
@@ -319,14 +314,28 @@ const Annotator = () => {
         </div>
       </div>
 
-      <div className="flex-grow">
-        {dziUrl ? (
-          <div id="osd-viewer" style={{ width: "100%", height: "100%", background: "black" }} />
-        ) : (
-          <div className="h-full flex items-center justify-center text-gray-500">
-            Upload .svs to start annotating
+      {/* Viewer UI with 3 states */}
+      <div className="flex-grow relative">
+        {isLoading && (
+          <div className="flex items-center justify-center h-full">
+            <Loading />
           </div>
         )}
+        {dziUrl ? (
+          <div
+            id="osd-viewer"
+            style={{ width: "100%", height: "100%", background: "black" }}
+          />
+        ) : (
+          !isLoading && (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              Upload .svs to start annotating
+            </div>
+          )
+        )}
+        {/* <div className="flex items-center justify-center h-full">
+          <Loading />
+        </div> */}
       </div>
     </div>
   );
