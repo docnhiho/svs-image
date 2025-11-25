@@ -110,7 +110,10 @@ def load_annotations():
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
-    return send_from_directory(STATIC_FOLDER, filename)
+    response = send_from_directory(STATIC_FOLDER, filename)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+    return response
 
 if __name__ == '__main__':
     app.run(debug=True)

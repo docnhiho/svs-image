@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import OpenSeadragon from "openseadragon";
 import Loading from '../components/Loading';
 import { toast } from '../components/Toast';
-console.log(toast);
 const Annotator = () => {
   const [annotations, setAnnotations] = useState([]);
   const annotationsRef = useRef([]);
@@ -24,46 +23,96 @@ const Annotator = () => {
     isDrawingModeRef.current = isDrawingMode;
   }, [isDrawingMode]);
 
-  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  // const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const isSpacePressed = false
   const isSpacePressedRef = useRef(false);
 
-  // -------------------------------------------------------
-  // Space key to pan
-  // -------------------------------------------------------
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.code === 'Space' && !e.repeat) {
-        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-          e.preventDefault();
-        }
-        setIsSpacePressed(true);
-        isSpacePressedRef.current = true;
-      }
+  // Thumbnails state
+  const [thumbnails, setThumbnails] = useState({});
 
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedAnnotationId) {
-          setAnnotations(prev => prev.filter(a => a.data.id !== selectedAnnotationId));
-          setSelectedAnnotationId(null);
-        }
-      }
-    };
+  // Function to capture thumbnail
+  const captureThumbnail = (anno) => {
+    if (!viewerRef.current) return null;
 
-    const handleKeyUp = (e) => {
-      if (e.code === 'Space') {
-        setIsSpacePressed(false);
-        isSpacePressedRef.current = false;
-      }
-    };
+    const viewer = viewerRef.current;
+    const canvas = viewer.drawer.canvas;
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+    const { x, y, width, height } = anno.geometry;
 
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [selectedAnnotationId]);
+    // Convert viewport coordinates to canvas pixel coordinates
+    const topLeftPoint = new OpenSeadragon.Point(x, y);
+    const bottomRightPoint = new OpenSeadragon.Point(x + width, y + height);
 
+    // Convert to viewer element (canvas) coordinates
+    const topLeftPixel = viewer.viewport.viewportToViewerElementCoordinates(topLeftPoint);
+    const bottomRightPixel = viewer.viewport.viewportToViewerElementCoordinates(bottomRightPoint);
+
+    // Get canvas size ratio
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+    const elementWidth = viewer.element.clientWidth;
+    const elementHeight = viewer.element.clientHeight;
+
+    const scaleX = canvasWidth / elementWidth;
+    const scaleY = canvasHeight / elementHeight;
+
+    // Convert to actual canvas coordinates
+    const pixelX = Math.floor(topLeftPixel.x * scaleX);
+    const pixelY = Math.floor(topLeftPixel.y * scaleY);
+    const pixelWidth = Math.floor((bottomRightPixel.x - topLeftPixel.x) * scaleX);
+    const pixelHeight = Math.floor((bottomRightPixel.y - topLeftPixel.y) * scaleY);
+
+    // Ensure coordinates are within canvas bounds
+    const safeX = Math.max(0, Math.min(pixelX, canvasWidth));
+    const safeY = Math.max(0, Math.min(pixelY, canvasHeight));
+    const safeWidth = Math.min(pixelWidth, canvasWidth - safeX);
+    const safeHeight = Math.min(pixelHeight, canvasHeight - safeY);
+
+    if (safeWidth <= 0 || safeHeight <= 0) {
+      console.warn('Invalid thumbnail dimensions');
+      return null;
+    }
+
+    // Create a temporary canvas to extract the region
+    const tempCanvas = document.createElement('canvas');
+    const maxThumbnailSize = 100; // Max dimension
+
+    // Calculate thumbnail size while preserving aspect ratio
+    const aspectRatio = safeWidth / safeHeight;
+    let thumbWidth, thumbHeight;
+
+    if (aspectRatio > 1) {
+      // Wider than tall
+      thumbWidth = maxThumbnailSize;
+      thumbHeight = maxThumbnailSize / aspectRatio;
+    } else {
+      // Taller than wide
+      thumbHeight = maxThumbnailSize;
+      thumbWidth = maxThumbnailSize * aspectRatio;
+    }
+
+    tempCanvas.width = thumbWidth;
+    tempCanvas.height = thumbHeight;
+    const ctx = tempCanvas.getContext('2d');
+
+    // Fill background (optional, won't be visible if we fill completely)
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, thumbWidth, thumbHeight);
+
+    try {
+      // Draw the cropped region to fill entire canvas
+      ctx.drawImage(
+        canvas,
+        safeX, safeY, safeWidth, safeHeight,
+        0, 0, thumbWidth, thumbHeight
+      );
+
+      return tempCanvas.toDataURL('image/png');
+    } catch (err) {
+      console.error('Error capturing thumbnail:', err);
+      return null;
+    }
+  };
 
   // -------------------------------------------------------
   // Upload .svs
@@ -141,10 +190,21 @@ const Annotator = () => {
       if (res.ok) {
         const data = await res.json();
         setAnnotations(data);
-        // alert("Annotations loaded successfully!");
+
+        // Generate thumbnails for loaded annotations
+        setTimeout(() => {
+          const newThumbnails = {};
+          data.forEach((anno) => {
+            const thumbnail = captureThumbnail(anno);
+            if (thumbnail) {
+              newThumbnails[anno.data.id] = thumbnail;
+            }
+          });
+          setThumbnails(newThumbnails);
+        }, 500); // Wait for viewer to render overlays
+
         toast.success("Annotations loaded successfully!");
       } else {
-        // alert("No saved annotations found for this file.");
         toast.error("No saved annotations found for this file.");
       }
     } catch (err) {
@@ -164,6 +224,9 @@ const Annotator = () => {
       id: "osd-viewer",
       prefixUrl: "https://cdnjs.cloudflare.com/ajax/libs/openseadragon/2.4.2/images/",
       tileSources: dziUrl,
+      crossOriginPolicy: "Anonymous",
+      loadTilesWithAjax: true,
+      ajaxWithCredentials: false,
       gestureSettingsMouse: {
         clickToZoom: false
       }
@@ -172,7 +235,7 @@ const Annotator = () => {
     viewerRef.current = viewer;
 
     viewer.addHandler("open", () => {
-      setLoading(false); // now image fully loaded
+      setLoading(false);
     });
 
     viewer.addHandler('canvas-click', (event) => {
@@ -258,6 +321,17 @@ const Annotator = () => {
             data: { id: Math.random() }
           };
 
+          // Capture thumbnail after a short delay to ensure canvas is rendered
+          setTimeout(() => {
+            const thumbnail = captureThumbnail(newAnno);
+            if (thumbnail) {
+              setThumbnails(prevThumbnails => ({
+                ...prevThumbnails,
+                [newAnno.data.id]: thumbnail
+              }));
+            }
+          }, 100);
+
           setAnnotations(a => [...a, newAnno]);
           setIsDrawingMode(false);
           return {};
@@ -268,7 +342,6 @@ const Annotator = () => {
     return () => mouseTracker.destroy();
   }, [isDrawingMode]);
 
-
   // -------------------------------------------------------
   // Enable / disable pan
   // -------------------------------------------------------
@@ -276,21 +349,6 @@ const Annotator = () => {
     if (!viewerRef.current) return;
     viewerRef.current.setMouseNavEnabled(!isDrawingMode || isSpacePressed);
   }, [isDrawingMode, isSpacePressed]);
-
-
-  // -------------------------------------------------------
-  // Undo Ctrl+Z
-  // -------------------------------------------------------
-  useEffect(() => {
-    const handleKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        e.preventDefault();
-        setAnnotations(prev => prev.slice(0, -1));
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, []);
 
 
   // -------------------------------------------------------
@@ -358,6 +416,11 @@ const Annotator = () => {
             onClick={() => {
               if (selectedAnnotationId) {
                 setAnnotations(prev => prev.filter(a => a.data.id !== selectedAnnotationId));
+                setThumbnails(prev => {
+                  const newThumbnails = { ...prev };
+                  delete newThumbnails[selectedAnnotationId];
+                  return newThumbnails;
+                });
                 setSelectedAnnotationId(null);
               }
             }}
@@ -368,7 +431,17 @@ const Annotator = () => {
 
           <button
             disabled={annotations.length === 0}
-            onClick={() => setAnnotations(prev => prev.slice(0, -1))}
+            onClick={() => {
+              const lastAnno = annotations[annotations.length - 1];
+              if (lastAnno) {
+                setThumbnails(prev => {
+                  const newThumbnails = { ...prev };
+                  delete newThumbnails[lastAnno.data.id];
+                  return newThumbnails;
+                });
+              }
+              setAnnotations(prev => prev.slice(0, -1));
+            }}
             className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-gray-600"}`}
           >
             Undo
@@ -391,38 +464,73 @@ const Annotator = () => {
             Load Annotations
           </button>
 
-          {/* <button
-            onClick={() => toast.success("Bạn vừa bấm nút!")}
-            className="px-4 py-2 bg-blue-500 text-white rounded"
-          >
-            Bấm tôi
-          </button> */}
-
           <input type="file" accept=".svs" onChange={handleUpload} />
         </div>
       </div>
 
-      <div className="flex-grow relative">
-        {isLoading && (
-          <div className="flex items-center justify-center h-full">
-            <Loading />
+      <div className="flex flex-col flex-grow overflow-hidden">
+        {/* Main viewer area */}
+        <div className="flex-grow relative">
+          {isLoading && (
+            <div className="flex items-center justify-center h-full">
+              <Loading />
+            </div>
+          )}
+          {dziUrl ? (
+            <div
+              id="osd-viewer"
+              style={{ width: "100%", height: "100%", background: "black" }}
+            />
+          ) : (
+            !isLoading && (
+              <div className="h-full flex items-center justify-center text-gray-500">
+                Upload .svs to start annotating
+              </div>
+            )
+          )}
+        </div>
+
+        {/* Thumbnails bottom panel */}
+        {annotations.length > 0 && (
+          <div className="bg-gray-50 border-t p-4" style={{ height: "180px" }}>
+            <h2 className="text-sm font-bold mb-2">Annotations ({annotations.length})</h2>
+            <div className="flex gap-3 overflow-x-auto pb-2" style={{ height: "calc(100% - 30px)" }}>
+              {annotations.map((anno, idx) => (
+                <div
+                  key={anno.data.id}
+                  onClick={() => setSelectedAnnotationId(anno.data.id)}
+                  className={`flex-shrink-0 cursor-pointer border-2 rounded p-2 transition-all ${selectedAnnotationId === anno.data.id
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-300 hover:border-gray-400'
+                    }`}
+                  style={{ width: "140px" }}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="font-semibold text-xs">#{idx + 1}</span>
+                    {selectedAnnotationId === anno.data.id && (
+                      <span className="text-xs text-blue-600 font-medium">✓</span>
+                    )}
+                  </div>
+                  {thumbnails[anno.data.id] ? (
+                    <img
+                      src={thumbnails[anno.data.id]}
+                      alt={`Annotation ${idx + 1}`}
+                      className="w-full h-auto rounded border border-gray-200 mb-1"
+                      style={{ maxHeight: "80px", objectFit: "contain" }}
+                    />
+                  ) : (
+                    <div className="w-full bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs mb-1" style={{ height: "80px" }}>
+                      Loading...
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-600 truncate">
+                    {Math.round(anno.geometry.width * 1000)} × {Math.round(anno.geometry.height * 1000)}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
-        {dziUrl ? (
-          <div
-            id="osd-viewer"
-            style={{ width: "100%", height: "100%", background: "black" }}
-          />
-        ) : (
-          !isLoading && (
-            <div className="h-full flex items-center justify-center text-gray-500">
-              Upload .svs to start annotating
-            </div>
-          )
-        )}
-        {/* <div className="flex items-center justify-center h-full">
-          <Loading />
-        </div> */}
       </div>
     </div>
   );
