@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import OpenSeadragon from "openseadragon";
 import Loading from '../components/Loading';
-
+import { toast } from '../components/Toast';
+console.log(toast);
 const Annotator = () => {
   const [annotations, setAnnotations] = useState([]);
   const annotationsRef = useRef([]);
@@ -82,6 +83,13 @@ const Annotator = () => {
         method: "POST",
         body: formData
       });
+      if (res.ok) {
+        // alert("Annotations saved successfully!");
+        toast.success("Image uploaded successfully!");
+      } else {
+        // alert("Failed to save annotations.");
+        toast.error("Failed to upload image.");
+      }
 
       const data = await res.json();
       setDziUrl(data.dzi_url);
@@ -110,9 +118,11 @@ const Annotator = () => {
       });
 
       if (res.ok) {
-        alert("Annotations saved successfully!");
+        // alert("Annotations saved successfully!");
+        toast.success("Annotations saved successfully!");
       } else {
-        alert("Failed to save annotations.");
+        // alert("Failed to save annotations.");
+        toast.error("Failed to save annotations.");
       }
     } catch (err) {
       console.error(err);
@@ -131,9 +141,11 @@ const Annotator = () => {
       if (res.ok) {
         const data = await res.json();
         setAnnotations(data);
-        alert("Annotations loaded successfully!");
+        // alert("Annotations loaded successfully!");
+        toast.success("Annotations loaded successfully!");
       } else {
-        alert("No saved annotations found for this file.");
+        // alert("No saved annotations found for this file.");
+        toast.error("No saved annotations found for this file.");
       }
     } catch (err) {
       console.error(err);
@@ -371,18 +383,25 @@ const Annotator = () => {
           </button>
 
           <button
-            disabled={!currentFileName}
+            disabled={!currentFileName && annotations.length === 0}
+            // disabled={annotations.length === 0}
             onClick={handleLoad}
             className={`px-4 py-2 rounded text-white ${!currentFileName ? "bg-gray-400" : "bg-yellow-600"}`}
           >
             Load Annotations
           </button>
 
+          {/* <button
+            onClick={() => toast.success("Bạn vừa bấm nút!")}
+            className="px-4 py-2 bg-blue-500 text-white rounded"
+          >
+            Bấm tôi
+          </button> */}
+
           <input type="file" accept=".svs" onChange={handleUpload} />
         </div>
       </div>
 
-      {/* Viewer UI with 3 states */}
       <div className="flex-grow relative">
         {isLoading && (
           <div className="flex items-center justify-center h-full">
