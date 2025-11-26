@@ -2,6 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import OpenSeadragon from "openseadragon";
 import Loading from '../components/Loading';
 import { toast } from '../components/Toast';
+
+import { ReactComponent as PencilIcon } from '../icon/pencil-svgrepo-com.svg';
+import { ReactComponent as StopIcon } from '../icon/stop-svgrepo-com.svg';
+import { ReactComponent as SaveIcon } from '../icon/save-item-1411-svgrepo-com.svg';
+import { ReactComponent as UndoIcon } from '../icon/undo-left-svgrepo-com.svg';
+import { ReactComponent as DeleteIcon } from '../icon/delete-1487-svgrepo-com.svg';
+import { ReactComponent as BookmarkIcon } from '../icon/bookmark-svgrepo-com.svg';
+
 const Annotator = () => {
   const [annotations, setAnnotations] = useState([]);
   const annotationsRef = useRef([]);
@@ -408,7 +416,10 @@ const Annotator = () => {
             onClick={() => setIsDrawingMode(!isDrawingMode)}
             className="px-4 py-2 bg-blue-500 text-white rounded"
           >
-            {isDrawingMode ? "Stop Drawing" : "Draw Annotation"}
+            {/* {isDrawingMode ? "Stop Drawing" : "Draw Annotation"} */}
+            {isDrawingMode ? (<StopIcon className="w-5 h-5" />) : (<PencilIcon className="w-5 h-5" />)}
+
+
           </button>
 
           <button
@@ -426,7 +437,7 @@ const Annotator = () => {
             }}
             className={`px-4 py-2 rounded text-white ${!selectedAnnotationId ? "bg-gray-400" : "bg-red-600"}`}
           >
-            Delete Selected
+            <DeleteIcon className="w-5 h-5" />
           </button>
 
           <button
@@ -442,9 +453,9 @@ const Annotator = () => {
               }
               setAnnotations(prev => prev.slice(0, -1));
             }}
-            className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-gray-600"}`}
+            className={`px-4 py-2 rounded text-white bg-gray-400`}
           >
-            Undo
+            <UndoIcon className="w-5 h-5" />
           </button>
 
           <button
@@ -452,7 +463,7 @@ const Annotator = () => {
             onClick={handleSave}
             className={`px-4 py-2 rounded text-white ${annotations.length === 0 ? "bg-gray-400" : "bg-green-600"}`}
           >
-            Save Annotations
+            <SaveIcon className="w-5 h-5" />
           </button>
 
           <button
@@ -461,10 +472,11 @@ const Annotator = () => {
             onClick={handleLoad}
             className={`px-4 py-2 rounded text-white ${!currentFileName ? "bg-gray-400" : "bg-yellow-600"}`}
           >
-            Load Annotations
+            <BookmarkIcon className="w-5 h-5" />
           </button>
 
           <input type="file" accept=".svs" onChange={handleUpload} />
+
         </div>
       </div>
 
