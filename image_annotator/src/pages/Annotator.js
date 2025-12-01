@@ -221,6 +221,63 @@ const Annotator = () => {
     }
   };
 
+  // -------------------------------------------------------
+  // AI Detection
+  // -------------------------------------------------------
+  const handleAIDetect = async () => {
+    if (!currentFileName) {
+      toast.error("Please upload an image first");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("http://127.0.0.1:5000/predict", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          filename: currentFileName
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const predictions = data.predictions;
+
+        // Add AI predictions to annotations
+        setAnnotations(prev => [...prev, ...predictions]);
+
+        // Generate thumbnails for AI predictions
+        setTimeout(() => {
+          const newThumbnails = {};
+          predictions.forEach((pred) => {
+            const thumbnail = captureThumbnail(pred);
+            if (thumbnail) {
+              newThumbnails[pred.data.id] = thumbnail;
+            }
+          });
+          setThumbnails(prevThumbnails => ({
+            ...prevThumbnails,
+            ...newThumbnails
+          }));
+        }, 500);
+
+        toast.success(`AI detected ${predictions.length} cells!`);
+      } else {
+        const error = await res.json();
+        toast.error(`AI detection failed: ${error.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Error running AI detection");
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   // -------------------------------------------------------
   // Init OpenSeadragon
@@ -372,7 +429,33 @@ const Annotator = () => {
       const el = document.createElement("div");
       el.className = "annotation-overlay";
       el.style.position = "absolute";
-      el.style.border = anno.data.id === selectedAnnotationId ? "3px solid blue" : "2px solid red";
+
+      // Different colors for AI predictions vs manual annotations
+      const isAI = anno.data.type === 'ai_prediction';
+      const isSelected = anno.data.id === selectedAnnotationId;
+
+      if (isSelected) {
+        el.style.border = "3px solid blue";
+      } else if (isAI) {
+        el.style.border = "2px solid purple";
+      } else {
+        el.style.border = "2px solid red";
+      }
+
+      // Add label for AI predictions - only show when selected
+      if (isAI && anno.data.class && isSelected) {
+        const label = document.createElement("div");
+        label.style.position = "absolute";
+        label.style.top = "-20px";
+        label.style.left = "0";
+        label.style.background = "purple";
+        label.style.color = "white";
+        label.style.padding = "2px 6px";
+        label.style.fontSize = "10px";
+        label.style.borderRadius = "3px";
+        label.textContent = `${anno.data.class} ${(anno.data.confidence * 100).toFixed(0)}%`;
+        el.appendChild(label);
+      }
 
       viewer.addOverlay({
         element: el,
@@ -420,6 +503,17 @@ const Annotator = () => {
             {isDrawingMode ? (<StopIcon className="w-5 h-5" />) : (<PencilIcon className="w-5 h-5" />)}
 
 
+          </button>
+
+          <button
+            onClick={handleAIDetect}
+            disabled={!currentFileName}
+            className={`px-4 py-2 rounded text-white ${!currentFileName ? "bg-gray-400" : "bg-purple-600 hover:bg-purple-700"}`}
+            title="AI Auto-Detect Cells"
+          >
+            <span className="flex items-center gap-2">
+              🤖 AI Detect
+            </span>
           </button>
 
           <button
@@ -475,7 +569,11 @@ const Annotator = () => {
             <BookmarkIcon className="w-5 h-5" />
           </button>
 
-          <input type="file" accept=".svs" onChange={handleUpload} />
+          <input
+            type="file"
+            accept=".svs,.tif,.tiff,.jpg,.jpeg,.png,.bmp,.ndpi,.vms,.vmu,.scn"
+            onChange={handleUpload}
+          />
 
         </div>
       </div>
@@ -510,7 +608,35 @@ const Annotator = () => {
               {annotations.map((anno, idx) => (
                 <div
                   key={anno.data.id}
-                  onClick={() => setSelectedAnnotationId(anno.data.id)}
+                  onClick={() => {
+                    setSelectedAnnotationId(anno.data.id);
+
+                    // Zoom and pan to the annotation
+                    if (viewerRef.current) {
+                      const viewer = viewerRef.current;
+                      const { x, y, width, height } = anno.geometry;
+
+                      // Calculate center point of the annotation
+                      const centerX = x + width / 2;
+                      const centerY = y + height / 2;
+
+                      // Calculate zoom level to fit the annotation with some padding
+                      const viewport = viewer.viewport;
+                      const viewportBounds = viewport.getBounds();
+
+                      // Zoom to show annotation with 2x padding
+                      const padding = 2;
+                      const targetZoom = Math.min(
+                        viewportBounds.width / (width * padding),
+                        viewportBounds.height / (height * padding)
+                      );
+
+                      // Pan to center and zoom
+                      const center = new OpenSeadragon.Point(centerX, centerY);
+                      viewport.panTo(center, true);
+                      viewport.zoomTo(viewport.getZoom() * targetZoom, center, true);
+                    }
+                  }}
                   className={`flex-shrink-0 cursor-pointer border-2 rounded p-2 transition-all ${selectedAnnotationId === anno.data.id
                     ? 'border-blue-500 bg-blue-50'
                     : 'border-gray-300 hover:border-gray-400'
@@ -535,9 +661,9 @@ const Annotator = () => {
                       Loading...
                     </div>
                   )}
-                  <div className="text-xs text-gray-600 truncate">
+                  {/* <div className="text-xs text-gray-600 truncate">
                     {Math.round(anno.geometry.width * 1000)} × {Math.round(anno.geometry.height * 1000)}
-                  </div>
+                  </div> */}
                 </div>
               ))}
             </div>
