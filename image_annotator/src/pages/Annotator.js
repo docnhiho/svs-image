@@ -433,27 +433,38 @@ const Annotator = () => {
       // Different colors for AI predictions vs manual annotations
       const isAI = anno.data.type === 'ai_prediction';
       const isSelected = anno.data.id === selectedAnnotationId;
+      const classType = anno.data.class; // "Nucleus" or "Cell"
+      const classification = anno.data.classification; // HSIL, LSIL, ASC-H, ASC-US
 
+      // Color scheme matching detectSVS.py:
+      // - Nucleus: RED
+      // - Cell: GREEN
+      // - Selected: BLUE
+      // - Manual annotation: RED
       if (isSelected) {
         el.style.border = "3px solid blue";
-      } else if (isAI) {
-        el.style.border = "2px solid purple";
+      } else if (isAI && classType === 'Nucleus') {
+        el.style.border = "2px solid red";
+      } else if (isAI && classType === 'Cell') {
+        el.style.border = "2px solid green";
       } else {
         el.style.border = "2px solid red";
       }
 
-      // Add label for AI predictions - only show when selected
-      if (isAI && anno.data.class && isSelected) {
+      // Add classification label if exists
+      if (classification && classType === 'Cell') {
         const label = document.createElement("div");
         label.style.position = "absolute";
         label.style.top = "-20px";
         label.style.left = "0";
-        label.style.background = "purple";
+        label.style.background = "rgba(0, 0, 0, 0.7)";
         label.style.color = "white";
         label.style.padding = "2px 6px";
-        label.style.fontSize = "10px";
+        label.style.fontSize = "12px";
+        label.style.fontWeight = "bold";
         label.style.borderRadius = "3px";
-        label.textContent = `${anno.data.class} ${(anno.data.confidence * 100).toFixed(0)}%`;
+        label.style.whiteSpace = "nowrap";
+        label.textContent = classification;
         el.appendChild(label);
       }
 
@@ -561,13 +572,76 @@ const Annotator = () => {
           </button>
 
           <button
-            disabled={!currentFileName && annotations.length === 0}
-            // disabled={annotations.length === 0}
+            disabled={!currentFileName}
             onClick={handleLoad}
             className={`px-4 py-2 rounded text-white ${!currentFileName ? "bg-gray-400" : "bg-yellow-600"}`}
           >
             <BookmarkIcon className="w-5 h-5" />
           </button>
+
+          {/* Classification Dropdown - Fixed Position */}
+          <div className="ml-4 flex items-center gap-2 px-3 py-2 bg-gray-100 rounded">
+            <label className="text-sm font-medium text-gray-700">Classify:</label>
+            <select
+              value={(() => {
+                if (!selectedAnnotationId) return "";
+                const selectedAnno = annotations.find(a => a.data.id === selectedAnnotationId);
+                return selectedAnno?.data?.classification || "";
+              })()}
+              onChange={(e) => {
+                if (selectedAnnotationId) {
+                  const value = e.target.value;
+                  setAnnotations(prev => prev.map(anno => {
+                    if (anno.data.id === selectedAnnotationId) {
+                      if (value === "") {
+                        // Remove classification - create new data object without classification field
+                        const newData = {
+                          id: anno.data.id,
+                          type: anno.data.type,
+                          class: anno.data.class,
+                          confidence: anno.data.confidence
+                        };
+                        return {
+                          geometry: anno.geometry,
+                          data: newData
+                        };
+                      } else {
+                        // Set classification
+                        return {
+                          geometry: anno.geometry,
+                          data: {
+                            ...anno.data,
+                            classification: value
+                          }
+                        };
+                      }
+                    }
+                    return anno;
+                  }));
+                  if (value) {
+                    toast.success(`Classified as ${value}`);
+                  } else {
+                    toast.success('Classification removed');
+                  }
+                }
+              }}
+              disabled={(() => {
+                if (!selectedAnnotationId) return true;
+                const selectedAnno = annotations.find(a => a.data.id === selectedAnnotationId);
+                return selectedAnno?.data?.class !== 'Cell';
+              })()}
+              className={`px-3 py-1 rounded border ${!selectedAnnotationId || annotations.find(a => a.data.id === selectedAnnotationId)?.data?.class !== 'Cell'
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-white border-gray-300 hover:border-blue-500 cursor-pointer'
+                }`}
+            >
+              <option value="">-- Select --</option>
+              <option value="HSIL">HSIL</option>
+              <option value="LSIL">LSIL</option>
+              <option value="ASC-H">ASC-H</option>
+              <option value="ASC-US">ASC-US</option>
+            </select>
+          </div>
 
           <input
             type="file"
@@ -599,78 +673,79 @@ const Annotator = () => {
             )
           )}
         </div>
+      </div>
 
-        {/* Thumbnails bottom panel */}
-        {annotations.length > 0 && (
-          <div className="bg-gray-50 border-t p-4" style={{ height: "180px" }}>
-            <h2 className="text-sm font-bold mb-2">Annotations ({annotations.length})</h2>
-            <div className="flex gap-3 overflow-x-auto pb-2" style={{ height: "calc(100% - 30px)" }}>
-              {annotations.map((anno, idx) => (
-                <div
-                  key={anno.data.id}
-                  onClick={() => {
-                    setSelectedAnnotationId(anno.data.id);
+      {/* Thumbnails bottom panel */}
+      {annotations.length > 0 && (
+        <div className="bg-gray-50 border-t p-4" style={{ height: "180px" }}>
+          <h2 className="text-sm font-bold mb-2">Annotations ({annotations.length})</h2>
+          <div className="flex gap-3 overflow-x-auto pb-2" style={{ height: "calc(100% - 30px)" }}>
+            {annotations.map((anno, idx) => (
+              <div
+                key={anno.data.id}
+                onClick={() => {
+                  setSelectedAnnotationId(anno.data.id);
 
-                    // Zoom and pan to the annotation
-                    if (viewerRef.current) {
-                      const viewer = viewerRef.current;
-                      const { x, y, width, height } = anno.geometry;
+                  // Zoom and pan to the annotation
+                  if (viewerRef.current) {
+                    const viewer = viewerRef.current;
+                    const { x, y, width, height } = anno.geometry;
 
-                      // Calculate center point of the annotation
-                      const centerX = x + width / 2;
-                      const centerY = y + height / 2;
+                    // Calculate center point of the annotation
+                    const centerX = x + width / 2;
+                    const centerY = y + height / 2;
 
-                      // Calculate zoom level to fit the annotation with some padding
-                      const viewport = viewer.viewport;
-                      const viewportBounds = viewport.getBounds();
+                    // Calculate zoom level to fit the annotation with some padding
+                    const viewport = viewer.viewport;
+                    const viewportBounds = viewport.getBounds();
 
-                      // Zoom to show annotation with 2x padding
-                      const padding = 2;
-                      const targetZoom = Math.min(
-                        viewportBounds.width / (width * padding),
-                        viewportBounds.height / (height * padding)
-                      );
+                    // Zoom to show annotation with 2x padding
+                    const padding = 2;
+                    const targetZoom = Math.min(
+                      viewportBounds.width / (width * padding),
+                      viewportBounds.height / (height * padding)
+                    );
 
-                      // Pan to center and zoom
-                      const center = new OpenSeadragon.Point(centerX, centerY);
-                      viewport.panTo(center, true);
-                      viewport.zoomTo(viewport.getZoom() * targetZoom, center, true);
-                    }
-                  }}
-                  className={`flex-shrink-0 cursor-pointer border-2 rounded p-2 transition-all ${selectedAnnotationId === anno.data.id
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-300 hover:border-gray-400'
-                    }`}
-                  style={{ width: "140px" }}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-semibold text-xs">#{idx + 1}</span>
-                    {selectedAnnotationId === anno.data.id && (
-                      <span className="text-xs text-blue-600 font-medium">✓</span>
-                    )}
-                  </div>
-                  {thumbnails[anno.data.id] ? (
-                    <img
-                      src={thumbnails[anno.data.id]}
-                      alt={`Annotation ${idx + 1}`}
-                      className="w-full h-auto rounded border border-gray-200 mb-1"
-                      style={{ maxHeight: "80px", objectFit: "contain" }}
-                    />
-                  ) : (
-                    <div className="w-full bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs mb-1" style={{ height: "80px" }}>
-                      Loading...
-                    </div>
+                    // Pan to center and zoom
+                    const center = new OpenSeadragon.Point(centerX, centerY);
+                    viewport.panTo(center, true);
+                    viewport.zoomTo(viewport.getZoom() * targetZoom, center, true);
+                  }
+                }}
+                className={`flex-shrink-0 cursor-pointer border-2 rounded p-2 transition-all ${selectedAnnotationId === anno.data.id
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                style={{ width: "140px" }}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-semibold text-xs">#{idx + 1}</span>
+                  {selectedAnnotationId === anno.data.id && (
+                    <span className="text-xs text-blue-600 font-medium">✓</span>
                   )}
-                  {/* <div className="text-xs text-gray-600 truncate">
+                </div>
+                {thumbnails[anno.data.id] ? (
+                  <img
+                    src={thumbnails[anno.data.id]}
+                    alt={`Annotation ${idx + 1}`}
+                    className="w-full h-auto rounded border border-gray-200 mb-1"
+                    style={{ maxHeight: "80px", objectFit: "contain" }}
+                  />
+                ) : (
+                  <div className="w-full bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs mb-1" style={{ height: "80px" }}>
+                    Loading...
+                  </div>
+                )}
+                {/* <div className="text-xs text-gray-600 truncate">
                     {Math.round(anno.geometry.width * 1000)} × {Math.round(anno.geometry.height * 1000)}
                   </div> */}
-                </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
+
   );
 };
 
