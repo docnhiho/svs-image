@@ -383,7 +383,12 @@ const Annotator = () => {
 
           const newAnno = {
             geometry: prev.geometry,
-            data: { id: Math.random() }
+            data: {
+              id: `manual_${Math.random()}`,
+              type: "manual",
+              class: "Nucleus",
+              confidence: 1.0
+            }
           };
 
           // Capture thumbnail after a short delay to ensure canvas is rendered
@@ -436,23 +441,39 @@ const Annotator = () => {
       const classType = anno.data.class; // "Nucleus" or "Cell"
       const classification = anno.data.classification; // HSIL, LSIL, ASC-H, ASC-US
 
-      // Color scheme matching detectSVS.py:
-      // - Nucleus: RED
-      // - Cell: GREEN
-      // - Selected: BLUE
-      // - Manual annotation: RED
+      // Color scheme based on medical severity:
+      // - Selected: BLUE (always takes priority)
+      // - Manual annotation: MAROON (dark red)
+      // - HSIL/LSIL: RED (high risk - precancerous or HPV infection)
+      // - ASC-H: GREEN (suspicious - cannot exclude HSIL)
+      // - ASC-US: ORANGE (uncertain - atypical but undetermined)
+      // - No classification: default based on class type
+
       if (isSelected) {
         el.style.border = "3px solid blue";
+      } else if (anno.data.type === 'manual') {
+        // Manual annotation: Maroon (dark red)
+        el.style.border = "2px solid maroon";
       } else if (isAI && classType === 'Nucleus') {
-        el.style.border = "2px solid red";
+        // Nucleus: Color based on classification
+        if (classification === 'HSIL' || classification === 'LSIL') {
+          el.style.border = "2px solid red";
+        } else if (classification === 'ASC-H') {
+          el.style.border = "2px solid green";
+        } else if (classification === 'ASC-US') {
+          el.style.border = "2px solid orange";
+        } else {
+          // No classification - default red
+          el.style.border = "2px solid red";
+        }
       } else if (isAI && classType === 'Cell') {
         el.style.border = "2px solid green";
       } else {
         el.style.border = "2px solid red";
       }
 
-      // Add classification label if exists
-      if (classification && classType === 'Cell') {
+      // Add classification label ONLY if selected (for both manual and AI nucleus)
+      if (isSelected && classification && classType === 'Nucleus') {
         const label = document.createElement("div");
         label.style.position = "absolute";
         label.style.top = "-20px";
@@ -480,9 +501,10 @@ const Annotator = () => {
     });
 
     if (annotation.geometry) {
+      // Add annotation being drawn (preview)
       const el = document.createElement("div");
       el.style.position = "absolute";
-      el.style.border = "2px solid red";
+      el.style.border = "2px solid maroon";  // Maroon for drawing preview
 
       viewer.addOverlay({
         element: el,
@@ -628,11 +650,12 @@ const Annotator = () => {
               disabled={(() => {
                 if (!selectedAnnotationId) return true;
                 const selectedAnno = annotations.find(a => a.data.id === selectedAnnotationId);
-                return selectedAnno?.data?.class !== 'Cell';
+                // Enable for both AI and manual Nucleus annotations
+                return selectedAnno?.data?.class !== 'Nucleus';
               })()}
-              className={`px-3 py-1 rounded border ${!selectedAnnotationId || annotations.find(a => a.data.id === selectedAnnotationId)?.data?.class !== 'Cell'
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : 'bg-white border-gray-300 hover:border-blue-500 cursor-pointer'
+              className={`px-3 py-1 rounded border ${!selectedAnnotationId || annotations.find(a => a.data.id === selectedAnnotationId)?.data?.class !== 'Nucleus'
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-white border-gray-300 hover:border-blue-500 cursor-pointer'
                 }`}
             >
               <option value="">-- Select --</option>

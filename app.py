@@ -294,7 +294,7 @@ def predict_cells():
             return jsonify({"error": f"Failed to load image: {str(e)}"}), 500
         
         # Run detection (cell only - no nucleus)
-        detections = detect_multiclass(img, mode="cell_only")
+        detections = detect_multiclass(img, mode="nucleus_only")
         
         # # Run detection
         # detections = detect_multiclass(img)
@@ -333,9 +333,10 @@ def predict_cells():
             y = det.get('y', 0)
             w = det.get('w', 0)
             h = det.get('h', 0)
+            classification = det.get('classification')  # Get auto-classification
             
             # Convert to viewport coordinates (normalize by original_width)
-            predictions.append({
+            prediction_data = {
                 "geometry": {
                     "x": float(x) / original_width,
                     "y": float(y) / original_width,
@@ -348,7 +349,13 @@ def predict_cells():
                     "class": "Nucleus" if label == "nucleus" else "Cell",
                     "confidence": 0.95 if label == "nucleus" else 0.90
                 }
-            })
+            }
+            
+            # Add classification if it exists (for nucleus)
+            if classification:
+                prediction_data["data"]["classification"] = classification
+            
+            predictions.append(prediction_data)
         
         # Count by type
         nucleus_count = sum(1 for d in detections if d.get('label') == 'nucleus')

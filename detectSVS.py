@@ -78,6 +78,100 @@ def load_image_any(path):
 
 
 # =========================================
+# CLASSIFY NUCLEUS (HEURISTIC)
+# =========================================
+def classify_nucleus_heuristic(img, x, y, w, h, contour):
+    """
+    Phân loại nucleus dựa trên heuristics đơn giản.
+    
+    Args:
+        img: Ảnh gốc (RGB)
+        x, y, w, h: Bounding box của nucleus
+        contour: Contour của nucleus
+    
+    Returns:
+        str: "HSIL", "LSIL", "ASC-H", "ASC-US", hoặc None
+    """
+    # Extract region of interest
+    roi = img[y:y+h, x:x+w]
+    if roi.size == 0:
+        return None
+    
+    # Feature 1: SIZE (area)
+    area = w * h
+    
+    # Feature 2: INTENSITY (darkness) - lower value = darker
+    gray_roi = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+    mean_intensity = np.mean(gray_roi)
+    
+    # Feature 3: CIRCULARITY (shape regularity)
+    perimeter = cv2.arcLength(contour, True)
+    if perimeter > 0:
+        circularity = 4 * np.pi * cv2.contourArea(contour) / (perimeter ** 2)
+    else:
+        circularity = 0
+    
+    # Feature 4: ASPECT RATIO
+    aspect_ratio = float(w) / h if h > 0 else 1.0
+    
+    # ========================================
+    # HEURISTIC CLASSIFICATION RULES
+    # ========================================
+    # Dựa trên đặc điểm tế bào học:
+    
+    # N:C Ratio estimate: area càng lớn ~ N:C cao
+    # Chromatin density: mean_intensity thấp = đậm (hyperchromasia)
+    # Nuclear irregularity: circularity thấp = màng nhân không đều
+    
+    # ----------------------------------------
+    # HSIL: Tiền ung thư (CIN2/3)
+    # ----------------------------------------
+    # - Nhân chiếm ≥50% diện tích tế bào → area rất lớn
+    # - Chromatin đậm, thô, không đều → intensity rất thấp (<90)
+    # - Màng nhân không đều, răng cưa → circularity rất thấp (<0.65)
+    if area > 900 and mean_intensity < 90 and circularity < 0.65:
+        return "HSIL"
+    
+    # ----------------------------------------
+    # ASC-H: Nghi ngờ HSIL nhưng chưa chắc chắn
+    # ----------------------------------------
+    # - Nhân lớn, N:C tăng nhưng không cực kỳ cao
+    # - Chromatin đậm (<100) 
+    # - Màng nhân bất thường (circularity < 0.7)
+    # - Hoặc có 2/3 đặc điểm của HSIL
+    elif (area > 700 and mean_intensity < 100 and circularity < 0.7) or \
+         (area > 800 and mean_intensity < 95) or \
+         (area > 750 and circularity < 0.65):
+        return "ASC-H"
+    
+    # ----------------------------------------
+    # LSIL: HPV infection (CIN1)
+    # ----------------------------------------
+    # - Nhân phình to nhưng không cực độ (400-900)
+    # - Chromatin tương đối đậm (75-110)
+    # - N:C tăng nhưng thấp hơn HSIL
+    # - Có thể có koilocytosis (perinuclear halo) → circularity trung bình
+    elif 400 < area < 900 and 75 < mean_intensity < 110:
+        return "LSIL"
+    
+    # ----------------------------------------
+    # ASC-US: Bất thường nhưng không xác định
+    # ----------------------------------------
+    # - Nhân hơi to nhưng không vượt ngưỡng LSIL (<600)
+    # - N:C < 50% → area nhỏ-trung bình
+    # - Chromatin hơi thô nhưng không đậm (>85)
+    # - Màng nhân tương đối tròn (circularity > 0.65)
+    elif area < 600 and mean_intensity > 85 and circularity > 0.65:
+        return "ASC-US"
+    
+    # ----------------------------------------
+    # Default: ASC-US (uncertain cases)
+    # ----------------------------------------
+    else:
+        return "ASC-US"
+
+
+# =========================================
 # DETECT CELL + NUCLEUS
 # =========================================
 def detect_multiclass(img, mode="both"):
@@ -112,12 +206,16 @@ def detect_multiclass(img, mode="both"):
         for cnt in contours_nucleus:
             x, y, w, h = cv2.boundingRect(cnt)
             if 5 < w < 80 and 5 < h < 80:
+                # Classify nucleus using heuristics
+                classification = classify_nucleus_heuristic(img, x, y, w, h, cnt)
+                
                 results.append({
                     "label": "nucleus",
                     "x": int(x),
                     "y": int(y),
                     "w": int(w),
-                    "h": int(h)
+                    "h": int(h),
+                    "classification": classification  # Auto-classification
                 })
 
     # ===== Detect CELL AREA =====
